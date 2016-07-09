@@ -1,10 +1,10 @@
-package com.timcharper.sbt
+package net.nornagon.sbt
 
 import java.io.File
 import sbt.{config => sbtConfig, _}
 import sbt.Keys.{cleanFiles, libraryDependencies, managedSourceDirectories,
   sourceDirectories, sourceDirectory, sourceGenerators, sourceManaged, streams,
-  version, watchSources}
+  watchSources}
 
 object JnaeratorPlugin extends AutoPlugin {
   object autoImport {
@@ -16,6 +16,7 @@ object JnaeratorPlugin extends AutoPlugin {
     val jnaeratorGenerate = TaskKey[Seq[File]]("jnaerator-generate",
       "Run jnaerate and generate interfaces")
     val jnaeratorRuntime = SettingKey[Jnaerator.Runtime]("which runtime to use")
+    val jnaeratorRuntimeVersion = SettingKey[String]("version of the runtime to use")
 
     object Jnaerator {
       sealed trait Runtime
@@ -24,20 +25,21 @@ object JnaeratorPlugin extends AutoPlugin {
         case object BridJ extends Runtime
       }
       case class Target(
-        headerFile: File,
+        headerFiles: Seq[File],
         packageName: String,
         libraryName: String,
-        extraArgs: Seq[String] = Nil)
+        extraArgs: Seq[String] = Nil
+      )
 
-      lazy val settings = inConfig(jnaerator)(Seq[Setting[_]](
+      lazy val settings = inConfig(jnaerator)(Seq(
         sourceDirectory := ((sourceDirectory in Compile) { _ / "native" }).value,
         sourceDirectories := ((sourceDirectory in Compile) { _ :: Nil }).value,
         sourceManaged := ((sourceManaged in Compile) { _ / "jnaerator_interfaces" }).value,
         jnaeratorGenerate <<= runJnaerator
-      )) ++ Seq[Setting[_]](
+      )) ++ Seq(
         jnaeratorTargets := Nil,
         jnaeratorRuntime := Runtime.BridJ,
-        version := ((jnaeratorRuntime in jnaerator) {
+        jnaeratorRuntimeVersion := ((jnaeratorRuntime in jnaerator) {
           /* Latest versions against which the targetted version of JNAerator is
            * known to be compatible */
           case Runtime.JNA => "4.2.1"
@@ -45,13 +47,12 @@ object JnaeratorPlugin extends AutoPlugin {
         }).value,
         cleanFiles += (sourceManaged in jnaerator).value,
 
-        // watchSources ++= (jnaeratorTargets in jnaerator).flatMap(_.join).map { _.map(_.headerFile) }.value,
-        watchSources ++= (jnaeratorTargets in jnaerator).map { _.map(_.headerFile) }.value,
+        watchSources ++= (jnaeratorTargets in jnaerator).map { _.flatMap(_.headerFiles) }.value,
         watchSources += file("."),
 
         sourceGenerators in Compile += (jnaeratorGenerate in jnaerator).taskValue,
         managedSourceDirectories in Compile += (sourceManaged in jnaerator).value,
-        libraryDependencies += (jnaeratorRuntime in jnaerator, version in jnaerator).apply {
+        libraryDependencies += (jnaeratorRuntime in jnaerator, jnaeratorRuntimeVersion in jnaerator).apply {
           case (Jnaerator.Runtime.JNA, v) =>
             "net.java.dev.jna" % "jna" % v
           case (Jnaerator.Runtime.BridJ, v) =>
@@ -70,21 +71,25 @@ object JnaeratorPlugin extends AutoPlugin {
       val targetId = "c" + (targets.toList.map { target =>
         (target, runtime, outputPath)
       }).hashCode
-      val cachedCompile = FileFunction.cached(s.cacheDirectory / "jnaerator" / targetId, inStyle = FilesInfo.lastModified, outStyle = FilesInfo.exists) { (_: Set[File]) =>
+      val cachedCompile = FileFunction.cached(
+        s.cacheDirectory / "jnaerator" / targetId,
+        inStyle = FilesInfo.lastModified,
+        outStyle = FilesInfo.exists
+      ) { (_: Set[File]) =>
         IO.delete(outputPath)
         outputPath.mkdirs()
 
         targets.flatMap { target =>
-	        // java -jar bin/jnaerator.jar -package com.package.name -library libName lib/libName.h -o src/main/java -mode Directory -f -scalaStructSetters
-          val args = List(
+          val args = Seq(
             "-package", target.packageName,
             "-library", target.libraryName,
-            target.headerFile.getCanonicalPath,
             "-o", outputPath.getCanonicalPath,
             "-mode", "Directory",
-            "-f", "-scalaStructSetters") ++ target.extraArgs
+            "-runtime", runtime.toString,
+            "-f", "-scalaStructSetters"
+          ) ++ target.extraArgs ++ target.headerFiles.map(_.getCanonicalPath)
 
-          s.log.info(s"(${target.headerFile.getName}) Running JNAerator with args ${args.mkString(" ")}")
+          s.log.info(s"(${target.headerFiles.map(_.getName).mkString(",")}) Running JNAerator with args ${args.mkString(" ")}")
           try {
             com.ochafik.lang.jnaerator.JNAerator.main(args.toArray)
           } catch { case e: Exception =>
@@ -94,7 +99,7 @@ object JnaeratorPlugin extends AutoPlugin {
           (outputPath ** "*.java").get
         }.toSet
       }
-      cachedCompile(targets.map(_.headerFile).toSet).toSeq
+      cachedCompile(targets.flatMap(_.headerFiles).toSet).toSeq
     }
   }
 
