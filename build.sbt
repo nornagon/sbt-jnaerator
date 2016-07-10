@@ -1,3 +1,5 @@
+import bintray.Keys._
+
 name := "sbt-jnaerator"
 
 sbtPlugin := true
@@ -17,34 +19,9 @@ libraryDependencies ++= Seq(
 homepage := Some(url("https://github.com/nornagon/sbt-jnaerator"))
 
 licenses := Seq("Apache 2" -> url("http://www.apache.org/licenses/LICENSE-2.0.txt"))
-
-pomExtra := {
-  <scm>
-    <url>https://github.com/nornagon/jnaerator</url>
-    <connection>scm:git:git@github.com:nornagon/sbt-jnaerator.git</connection>
-  </scm>
-  <developers>
-    <developer>
-      <id>timcharper</id>
-      <name>Tim Harper</name>
-      <url>http://timcharper.com</url>
-    </developer>
-    <developer>
-      <id>nornagon</id>
-      <name>Jeremy Apthorp</name>
-      <url>http://nornagon.net</url>
-    </developer>
-  </developers>
-}
-
-publishMavenStyle := true
-
-publishTo := {
-  val nexus = "https://oss.sonatype.org/"
-  if (isSnapshot.value)
-    Some("snapshots" at nexus + "content/repositories/snapshots")
-  else
-    Some("releases"  at nexus + "service/local/staging/deploy/maven2")
-}
+publishMavenStyle := false
+bintrayPublishSettings
+repository in bintray := "sbt-plugins"
+bintrayOrganization in bintray := None
 
 publishArtifact in Test := false
